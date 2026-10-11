@@ -27,12 +27,21 @@ Thanks for helping to improve cc-ender-miner!
 - Handle failures explicitly: turtle actions return `false, reason` and must
   never be ignored silently.
 - No emojis in code, logs or on the turtle and monitor screens.
-- Keep the programs single files so they can be installed with `wget`.
+- Keep the programs single files so they can be installed with `wget`. The
+  follower is the one exception: it loads the shared job geometry from
+  `miner.lua`, so geometry changes must keep both in sync.
+- Bump `VERSION` in every program and in `manifest.json` together; a change
+  to the saved job format must also bump `stateFormat` (miner `STATE_FORMAT`),
+  otherwise the auto updater would install a version that cannot resume a
+  running job.
 
 ## Tests
 
-`tests/mock_cc.lua` simulates a voxel world, a turtle, EnderStorage chests,
-rednet and `parallel`. New behaviour needs a test in `tests/test_miner.lua`
+`tests/mock_cc.lua` simulates a voxel world with one or more turtles,
+EnderStorage chests, rednet, http, GPS and `parallel`. `tests/test_follower.lua`
+runs miner, follower and hub together with game time (0.4 s per action), and
+`tests/test_resume.lua` stops the turtle at hundreds of points to test the
+resume. New behaviour needs a test in `tests/test_miner.lua`
 or `tests/test_monitor.lua`. Run a single test with
 `lua tests/run.lua "part of the test name"`.
 

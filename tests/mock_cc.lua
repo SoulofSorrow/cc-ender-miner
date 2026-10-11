@@ -97,8 +97,106 @@ local function unserialize(text)
   return nil
 end
 
+--- Minimal JSON decoder, enough for manifest.json.
+---@param text string
+---@return any
+local function decodeJSON(text)
+  local i = 1
+  local parseValue
+  local function skip()
+    i = text:find("[^%s]", i) or (#text + 1)
+  end
+  local function parseString()
+    local out = {}
+    i = i + 1
+    while true do
+      local c = text:sub(i, i)
+      if c == "" then
+        error("unterminated string", 0)
+      elseif c == '"' then
+        i = i + 1
+        return table.concat(out)
+      elseif c == "\\" then
+        local n = text:sub(i + 1, i + 1)
+        local map = { n = "\n", t = "\t", r = "\r", b = "\b", f = "\f" }
+        out[#out + 1] = map[n] or n
+        i = i + 2
+      else
+        out[#out + 1] = c
+        i = i + 1
+      end
+    end
+  end
+  parseValue = function()
+    skip()
+    local c = text:sub(i, i)
+    if c == "{" then
+      local obj = {}
+      i = i + 1
+      skip()
+      if text:sub(i, i) == "}" then
+        i = i + 1
+        return obj
+      end
+      while true do
+        skip()
+        local k = parseString()
+        skip()
+        assert(text:sub(i, i) == ":", "expected ':'")
+        i = i + 1
+        obj[k] = parseValue()
+        skip()
+        local sep = text:sub(i, i)
+        i = i + 1
+        if sep == "}" then
+          return obj
+        end
+        assert(sep == ",", "expected ','")
+      end
+    elseif c == "[" then
+      local arr = {}
+      i = i + 1
+      skip()
+      if text:sub(i, i) == "]" then
+        i = i + 1
+        return arr
+      end
+      while true do
+        arr[#arr + 1] = parseValue()
+        skip()
+        local sep = text:sub(i, i)
+        i = i + 1
+        if sep == "]" then
+          return arr
+        end
+        assert(sep == ",", "expected ','")
+      end
+    elseif c == '"' then
+      return parseString()
+    elseif text:sub(i, i + 3) == "true" then
+      i = i + 4
+      return true
+    elseif text:sub(i, i + 4) == "false" then
+      i = i + 5
+      return false
+    elseif text:sub(i, i + 3) == "null" then
+      i = i + 4
+      return nil
+    end
+    local num = text:match("^-?%d+%.?%d*[eE]?[-+]?%d*", i)
+    assert(num and #num > 0, "unexpected character at " .. i)
+    i = i + #num
+    return tonumber(num)
+  end
+  local value = parseValue()
+  skip()
+  assert(i > #text, "trailing characters")
+  return value
+end
+
 Mock.serialize = serialize
 Mock.unserialize = unserialize
+Mock.decodeJSON = decodeJSON
 
 ---@param width integer
 ---@param height integer
@@ -182,6 +280,7 @@ end
 ---@field modem boolean|nil
 ---@field id integer|nil
 ---@field label string|nil
+---@field gps table|nil Absolute GPS frame {x, y, z, dir}
 
 ---@param opts MockOptions|nil
 ---@return table env
@@ -198,8 +297,14 @@ function Mock.new(opts)
     sent = {},
     queue = {},
     files = {},
+    dirs = {},
     clock = 0,
     moves = 0,
+    turns = 0,
+    actions = 0,
+    actionKinds = {},
+    killed = false,
+    kill = nil,
     sleeps = 0,
     hooks = {},
     inScheduler = false,
@@ -207,8 +312,12 @@ function Mock.new(opts)
   local generator = opts.generator or function()
     return "minecraft:stone"
   end
+  -- All turtle functions work on "t", the turtle whose API was called last
+  -- (see bindApi). The first turtle is env.turtle.
   local t = { x = 0, y = 0, z = 0, f = 0, inv = {}, sel = 1, fuel = opts.fuel or 5000, limit = 20000 }
+  local primary = t
   env.turtle = t
+  env.turtles = { t }
 
   -- %d keeps -0 and 0 on the same key
   local function key(x, y, z)
@@ -216,8 +325,10 @@ function Mock.new(opts)
   end
 
   function env.get(x, y, z)
-    if x == t.x and y == t.y and z == t.z then
-      return "turtle"
+    for _, other in ipairs(env.turtles) do
+      if x == other.x and y == other.y and z == other.z then
+        return "turtle"
+      end
     end
     local value = env.blocks[key(x, y, z)]
     if value == nil then
@@ -252,6 +363,8 @@ function Mock.new(opts)
       return t.x, t.y + 1, t.z
     elseif dir == "down" then
       return t.x, t.y - 1, t.z
+    elseif dir == "back" then
+      return t.x - DELTA[t.f][1], t.y, t.z - DELTA[t.f][2]
     end
     return t.x + DELTA[t.f][1], t.y, t.z + DELTA[t.f][2]
   end
@@ -282,6 +395,26 @@ function Mock.new(opts)
     if env.inScheduler and coroutine.running() then
       coroutine.yield("__tick")
     end
+  end
+
+  --- Simulate a chunk unload: the program stops for good at this point.
+  --- env.kill = { at = <action number>, after = <bool> } kills before or
+  --- after the world was changed by that action.
+  ---@param phase "before"|"after"
+  local function maybeKill(phase)
+    local kill = env.kill
+    if kill and not env.killed and env.actions == kill.at and (phase == "after") == (kill.after == true) then
+      env.killed = true
+      coroutine.yield("__kill")
+      error("killed coroutine was resumed", 0)
+    end
+  end
+
+  ---@param kind "move"|"turn"|"place"
+  local function beginAction(kind)
+    env.actions = env.actions + 1
+    env.actionKinds[env.actions] = kind
+    maybeKill("before")
   end
 
   local function chestAt(x, y, z)
@@ -329,11 +462,26 @@ function Mock.new(opts)
     if isEmpty(block) then
       return false, "No block to inspect"
     end
+    if block == "turtle" then
+      block = "computercraft:turtle_normal"
+    end
     return true, { name = block, tags = {} }
   end
 
+  local moveInner
+
   local function moveDir(dir)
-    if t.fuel <= 0 then
+    beginAction("move")
+    local ok, err = moveInner(dir)
+    maybeKill("after")
+    if ok then
+      yieldPoint()
+    end
+    return ok, err
+  end
+
+  moveInner = function(dir)
+    if t.fuel <= 0 and not opts.unlimited then
       return false, "Out of fuel"
     end
     local x, y, z = dirPos(dir)
@@ -342,18 +490,28 @@ function Mock.new(opts)
     end
     local ox, oy, oz = t.x, t.y, t.z
     t.x, t.y, t.z = x, y, z
-    t.fuel = t.fuel - 1
+    if not opts.unlimited then
+      t.fuel = t.fuel - 1
+    end
     env.moves = env.moves + 1
     env.set(ox, oy, oz, "air")
     settle(ox, oy, oz)
     if env.hooks.move then
       env.hooks.move(env)
     end
-    yieldPoint()
     return true
   end
 
+  local placeInner
+
   local function placeDir(dir)
+    beginAction("place")
+    local ok, err = placeInner(dir)
+    maybeKill("after")
+    return ok, err
+  end
+
+  placeInner = function(dir)
     local stack = t.inv[t.sel]
     if not stack then
       return false, "No items to place"
@@ -481,14 +639,20 @@ function Mock.new(opts)
     return moveDir("down")
   end
   api.back = function()
-    return false, "Movement obstructed"
+    return moveDir("back")
   end
   api.turnRight = function()
+    beginAction("turn")
     t.f = (t.f + 1) % 4
+    env.turns = env.turns + 1
+    maybeKill("after")
     return true
   end
   api.turnLeft = function()
+    beginAction("turn")
     t.f = (t.f + 3) % 4
+    env.turns = env.turns + 1
+    maybeKill("after")
     return true
   end
   api.select = function(slot)
@@ -577,11 +741,44 @@ function Mock.new(opts)
     end
     return t.limit
   end
-  env.api = api
+  --- Wrap the API so every call acts on one particular turtle.
+  ---@param turtleState table
+  ---@return table
+  local function bindApi(turtleState)
+    local bound = {}
+    for name, fn in pairs(api) do
+      bound[name] = function(...)
+        t = turtleState
+        return fn(...)
+      end
+    end
+    return bound
+  end
 
-  --- Put an item stack into a turtle slot.
+  env.api = bindApi(primary)
+
+  --- Add another turtle to the same world.
+  ---@param spec table {x, y, z, f, fuel}
+  ---@return table state
+  ---@return table api
+  function env.addTurtle(spec)
+    local state = {
+      x = spec.x or 0,
+      y = spec.y or 0,
+      z = spec.z or 0,
+      f = spec.f or 0,
+      inv = {},
+      sel = 1,
+      fuel = spec.fuel or 5000,
+      limit = 20000,
+    }
+    env.turtles[#env.turtles + 1] = state
+    return state, bindApi(state)
+  end
+
+  --- Put an item stack into a slot of the first turtle.
   function env.give(slot, name, count, nbt)
-    t.inv[slot] = { name = name, count = count, nbt = nbt }
+    primary.inv[slot] = { name = name, count = count, nbt = nbt }
   end
 
   --- Put stacks into an ender chest frequency.
@@ -656,12 +853,19 @@ function Mock.new(opts)
 
   --- Install the simulated APIs as globals.
   function env.install()
-    _G.turtle = api
+    _G.turtle = env.api
     _G.colors = Mock.colors
     _G.colours = Mock.colors
     _G.window = nil
     _G.keys = { q = 16 }
     _G.sleep = function(seconds)
+      if env.timed and env.inScheduler and coroutine.running() then
+        -- Event driven co-simulation: only the sleeping turtle loses time
+        env.sleeps = env.sleeps + 1
+        env.pendingSleep = (env.pendingSleep or 0) + (seconds or 0)
+        coroutine.yield("__tick")
+        return
+      end
       env.clock = env.clock + (seconds or 0)
       env.sleeps = env.sleeps + 1
       if env.hooks.sleep then
@@ -686,7 +890,41 @@ function Mock.new(opts)
     end
     _G.fs = {
       exists = function(path)
-        return env.files[path] ~= nil
+        return env.files[path] ~= nil or env.dirs[path] == true
+      end,
+      isDir = function(path)
+        return env.dirs[path] == true
+      end,
+      makeDir = function(path)
+        env.dirs[path] = true
+      end,
+      delete = function(path)
+        env.files[path] = nil
+        env.dirs[path] = nil
+      end,
+      move = function(from, to)
+        if env.files[from] == nil then
+          error("No such file: " .. from, 0)
+        end
+        if env.files[to] ~= nil then
+          error("File exists: " .. to, 0)
+        end
+        env.files[to] = env.files[from]
+        env.files[from] = nil
+      end,
+      list = function(dir)
+        local names = {}
+        for path in pairs(env.files) do
+          if dir == "" or dir == "/" then
+            if not path:find("/") then
+              names[#names + 1] = path
+            end
+          elseif path:sub(1, #dir + 1) == dir .. "/" then
+            names[#names + 1] = path:sub(#dir + 2)
+          end
+        end
+        table.sort(names)
+        return names
       end,
       open = function(path, mode)
         if mode == "r" then
@@ -712,7 +950,44 @@ function Mock.new(opts)
         }
       end,
     }
-    _G.textutils = { serialize = serialize, unserialize = unserialize }
+    _G.textutils = {
+      serialize = serialize,
+      unserialize = unserialize,
+      unserialiseJSON = decodeJSON,
+      unserializeJSON = decodeJSON,
+    }
+    env.settings = {}
+    _G.settings = {
+      get = function(name, default)
+        local value = env.settings[name]
+        if value == nil then
+          return default
+        end
+        return value
+      end,
+    }
+    -- env.http maps a URL (without query string) to { code, body } or false
+    env.http = {}
+    env.httpRequests = {}
+    _G.http = {
+      get = function(url)
+        local plain = url:gsub("%?.*$", "")
+        env.httpRequests[#env.httpRequests + 1] = plain
+        local entry = env.http[plain]
+        if not entry then
+          return nil, "Could not connect"
+        end
+        return {
+          getResponseCode = function()
+            return entry[1]
+          end,
+          readAll = function()
+            return entry[2]
+          end,
+          close = function() end,
+        }
+      end,
+    }
     _G.term = Mock.newScreen(39, 13)
     local modem = {
       isWireless = function()
@@ -755,6 +1030,24 @@ function Mock.new(opts)
       end,
     }
     _G.parallel = { waitForAny = waitForAny }
+    if opts.gps then
+      -- Absolute world frame: start block at opts.gps.{x,y,z}, relative
+      -- facing 0 points to compass direction opts.gps.dir
+      local compass = { north = { 0, -1 }, east = { 1, 0 }, south = { 0, 1 }, west = { -1, 0 } }
+      local d = compass[opts.gps.dir or "north"]
+      _G.gps = {
+        locate = function()
+          if env.gpsDown then
+            return nil
+          end
+          local ax = opts.gps.x + t.z * d[1] + t.x * -d[2]
+          local az = opts.gps.z + t.z * d[2] + t.x * d[1]
+          return ax, opts.gps.y + t.y, az
+        end,
+      }
+    else
+      _G.gps = nil
+    end
     _G.write = function() end
     _G.print = function() end
     _G.printError = function() end

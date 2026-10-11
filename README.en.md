@@ -12,7 +12,13 @@ ender chests and a live dashboard on a monitor.
   coal). The turtle restocks on its own.
 - **Dashboard (`minermon`)** on a computer with an ender modem and a 4x4
   advanced monitor: progress, fuel, inventory, ores found, event log and touch
-  buttons for pause, resume and return home.
+  buttons for pause, resume and return home. The computer is also the **hub**
+  between the miner and the follower.
+- **Follower (`follower`)**: optional second turtle with a chunk loader
+  upgrade that follows the miner and keeps its chunk loaded. Off by default,
+  the miner also works on its own.
+- **Auto update (`update`)**: all programs keep themselves up to date when
+  they start.
 
 Rewritten from scratch, inspired by the "Mining Turtle 3.5" script by PrinceTommen.
 
@@ -24,7 +30,8 @@ Rewritten from scratch, inspired by the "Mining Turtle 3.5" script by PrinceTomm
 | [EnderStorage](https://www.curseforge.com/minecraft/mc-mods/ender-storage-1-8) | Ender chests that turtles can access (vanilla ender chests do **not** work) |
 | Mining turtle with ender modem | Pickaxe on one side, ender modem on the other |
 | Computer with ender modem | Receives the telemetry |
-| 4x4 advanced monitor | Colour and touch for the dashboard |
+| Advanced monitor, 4x4 recommended (2x2 works too) | Colour and touch for the dashboard |
+| Optional: second turtle with a chunk loader upgrade and an ender modem | Follower that keeps the miner's chunk loaded |
 
 A wireless modem also works but has a limited range. The ender modem works
 at any distance and across dimensions.
@@ -60,16 +67,18 @@ The HTTP API must be enabled in the CC: Tweaked config (default).
 wget run https://raw.githubusercontent.com/SoulofSorrow/cc-ender-miner/main/src/install.lua
 ```
 
-A turtle gets `miner`, a computer gets `minermon`. Add `--startup` to also
-create a `startup.lua`:
+A turtle gets `miner`, a computer gets `minermon`. For the follower, name the
+role. Add `--startup` to also create a `startup.lua`:
 
 ```sh
 wget https://raw.githubusercontent.com/SoulofSorrow/cc-ender-miner/main/src/install.lua install
-install monitor --startup
+install monitor --startup     # hub computer
+install miner                 # mining turtle
+install follower              # follower turtle (also gets miner.lua for the geometry)
 ```
 
-You can also copy the files from `src/` by hand (`miner.lua` onto the turtle,
-`minermon.lua` onto the computer).
+Every role also gets `update.lua`, the auto updater. You can also copy the
+files from `src/` by hand.
 
 ## Usage
 
@@ -82,6 +91,10 @@ minermon        # text scale 0.5 (default, ideal for 4x4)
 minermon 1      # larger text
 ```
 
+On smaller monitors (e.g. 2x2) the dashboard switches to a compact layout
+automatically: only the essential values, ores, events and short buttons.
+Keep the default text scale 0.5 there, `minermon 1` gets very cramped.
+
 `Q` quits. `id` shows the computer id. Enter it on the turtle as "Monitor PC
 id" so the turtle only accepts commands from that computer.
 
@@ -93,6 +106,7 @@ Fill the slots as shown above, then run:
 ```sh
 miner           # shows the saved configuration, Enter starts
 miner setup     # run the wizard again
+miner resume    # continue an interrupted job (the startup file does this automatically)
 ```
 
 On the first start a wizard asks for all values and saves them to `miner.cfg`.
@@ -148,6 +162,7 @@ for 15 seconds are shown as **NO SIGNAL**.
 | `reportInterval` | 2 | Seconds between status updates |
 | `controllerId` | `nil` | Id of the dashboard computer. `nil` broadcasts and accepts commands from anyone |
 | `returnOnError` | `true` | Return to the start after an error |
+| `useFollower` | `false` | Work together with a follower turtle (chunk loader) |
 
 ## Failure handling
 
@@ -161,10 +176,136 @@ for 15 seconds are shown as **NO SIGNAL**.
 | Another turtle in the way | Never mined, the turtle waits |
 | Foreign items in the supply chest | Sent to the resource chest |
 | Vanilla ender chest | Rejected before the start |
+| Chunk unloaded / logged out | Continues automatically after the reload (see below) |
+| Restart in the middle of a turn without GPS | Shows **LOST**, the turtle stays where it is |
 
-**Chunk loading:** turtles stop as soon as their chunk unloads. Stay nearby or
-use a chunk loader. After a reboot the turtle no longer knows where it is.
-Put it back on its start point.
+## Logging out, chunk unloads and server restarts
+
+Minecraft stops a turtle as soon as its chunk unloads: you log out, move too
+far away, or the server restarts. No script can prevent that. `miner` makes
+sure the job **continues on its own exactly where it stopped**:
+
+- Position, facing and progress are saved continuously (`miner.state`,
+  `miner.pos`).
+- When a job starts, `miner` creates `startup/endermine.lua`. When the chunk
+  loads again, CC: Tweaked boots the turtle and the job continues after
+  5 seconds. Pressing a key at that moment cancels it.
+- These files are removed when the job ends.
+- When you start `miner` by hand and an interrupted job exists, it asks
+  whether to resume it.
+- An ender chest that was standing outside is picked up again after the
+  restart.
+- The dashboard shows **RESUMING** and counts the restarts.
+
+**Important – set up GPS:** a move that happened exactly when the chunk
+unloaded is detected through the fuel level. A **turn** uses no fuel, though.
+If the turtle is stopped during a turn (rare, but it happens), it cannot be
+sure where it is facing. Without GPS it then stops with **LOST** instead of
+digging in the wrong direction. With GPS it measures its facing again and
+continues. The same applies to servers with unlimited fuel.
+
+GPS tower with ender modems (works in the whole dimension, one tower is
+enough):
+
+1. Place four computers with one ender modem each, not all on one level,
+   e.g. the corners of a cube a few blocks apart.
+2. On each computer read the exact position **of the modem** with F3 and put
+   `gps host <x> <y> <z>` into its `startup.lua`.
+3. Test on the turtle: `gps locate` must print a position.
+
+The turtle detects GPS by itself when a job starts and reports
+"GPS available".
+
+**Keep mining while you are away:** the chunk has to stay loaded: with the
+[follower turtle](#follower-turtle-chunk-loader), with `/forceload` or with a
+server chunk claim (FTB Chunks or similar) over the mining area. With a
+pickaxe and an ender modem the miner has no free upgrade slot left. The hub
+computer and the ender chests at your base must be loaded too for the
+display, the relay and the chests to work.
+
+## Follower turtle (chunk loader)
+
+**Optional.** A second turtle with a **chunk loader upgrade** and an **ender
+modem** (no pickaxe needed) follows the miner and keeps its chunk loaded.
+Without a follower the miner works the same; it is only stopped by a chunk
+unload and continues afterwards. The hub
+computer connects the two: it relays the miner's position and progress to the
+follower.
+
+**Setup**
+
+1. Switch the follower on in the miner: run `miner setup` and answer `y` to
+   "Chunk loader follower" (or set `useFollower = true` in `miner.cfg`). When
+   it is off, the hub assigns no follower to the miner and releases one that
+   is already paired.
+2. Install the follower with `install follower` and put some coal into its
+   inventory.
+3. Place it **directly behind** the miner's start block, facing the same
+   direction.
+4. Start `follower`. On the first start it asks for the hub computer's id and
+   optionally the miner's id. `-1` means the hub assigns the next free miner.
+5. Start the miner. The follower appears as its own tab on the dashboard with
+   its distance to the miner and the state of its chunk loader.
+
+**How it stays out of the way**
+
+- It only drives through blocks the miner has provably dug already. It never
+  digs itself.
+- It only waits on **parking cells**: the top row of a 3 block high band in
+  the current tunnel, which the miner never drives through, or anywhere in
+  finished tunnels. With tunnels lower than 3 it parks in finished tunnels
+  only.
+- If it ever is in the way, the miner reports it and the hub asks the
+  follower to make way.
+- In simulations with various tunnel shapes the follower never got in the
+  miner's way.
+
+**Chunks and GPS:** with GPS the follower knows the chunk borders. It then
+prefers parking cells in the miner's chunk, and the miner reports every chunk
+change at once. In the simulations it stayed in the same or a directly
+adjacent chunk more than 95 % of the time. If the miner goes silent (its chunk
+was unloaded after all), the follower drives up to 2 blocks from its last
+known position. The chunk loads again and the miner continues with the
+automatic resume.
+
+**Please check:** which chunks your chunk loader upgrade loads (only its own
+or the neighbours too) and whether it has to be switched on with `setActive`
+depends on the mod. The follower switches upgrades on with `setActive`
+automatically and shows "active", "passive" or "none". Without a chunk loader
+it still follows but keeps nothing loaded. In single player no chunk loader
+helps, because the whole world stops when you log out.
+
+When the job is done, the follower drives **directly in front of the miner**
+(block 0/0/1) and stops there.
+
+## Auto update
+
+Miner, follower and hub check for a new version on every start
+(`manifest.json` on the `main` branch of the repository). If there is one,
+they download only their own files, check each file for valid Lua, replace
+them all together and restart.
+
+- **Running jobs:** an interrupted job is only updated when the new version
+  can read its saved state. Otherwise the update waits until the job is done.
+- **Version check:** the hub shows every device's version and warns when it
+  differs from its own.
+- **By hand:**
+
+  ```sh
+  update            # detects the role
+  update follower   # name the role
+  update --force    # reinstall even if the version is the same
+  ```
+
+- **Switch off or use your own source:**
+
+  ```sh
+  set endermine.auto_update false
+  set endermine.update_url https://raw.githubusercontent.com/<user>/<repo>/<branch>/
+  ```
+
+Without the HTTP API or without network the program simply keeps running the
+installed version.
 
 ## Development
 

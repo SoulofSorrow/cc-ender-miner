@@ -2,20 +2,48 @@
 -- Copyright (C) 2026 Julian Schäfer
 -- SPDX-License-Identifier: GPL-3.0-or-later
 --
--- Usage:  install [miner|monitor] [--startup]
--- Without a target, turtles get the miner and computers get the monitor.
+-- Usage:  install [miner|monitor|follower] [--startup]
+-- Without a role, turtles get the miner and computers get the monitor.
+-- Every role also gets the updater (update.lua), which keeps the programs
+-- current from then on.
 
-local BASE_URL = "https://raw.githubusercontent.com/SoulofSorrow/cc-ender-miner/main/src/"
+local BASE_URL = "https://raw.githubusercontent.com/SoulofSorrow/cc-ender-miner/main/"
 
----@class InstallTarget
----@field source string File name in the repository
----@field program string Program name on the computer
+---@class InstallRole
+---@field files table<string, string> Local file name -> path in the repository
+---@field program string Program started by --startup
 
----@type table<string, InstallTarget>
-local TARGETS = {
-  miner = { source = "miner.lua", program = "miner" },
-  monitor = { source = "minermon.lua", program = "minermon" },
+---@type table<string, InstallRole>
+local ROLES = {
+  miner = {
+    files = { ["miner.lua"] = "src/miner.lua", ["update.lua"] = "src/update.lua" },
+    program = "miner",
+  },
+  monitor = {
+    files = { ["minermon.lua"] = "src/minermon.lua", ["update.lua"] = "src/update.lua" },
+    program = "minermon",
+  },
+  follower = {
+    files = {
+      ["follower.lua"] = "src/follower.lua",
+      ["miner.lua"] = "src/miner.lua",
+      ["update.lua"] = "src/update.lua",
+    },
+    program = "follower",
+  },
 }
+
+---@return string
+local function baseUrl()
+  local url = settings and settings.get("endermine.update_url") or nil
+  if type(url) ~= "string" or url == "" then
+    url = BASE_URL
+  end
+  if url:sub(-1) ~= "/" then
+    url = url .. "/"
+  end
+  return url
+end
 
 ---@param url string
 ---@return string|nil body
@@ -57,51 +85,58 @@ end
 ---@param argv string[]
 ---@return boolean success
 local function main(argv)
-  local targetName = nil
+  local roleName = nil
   local startup = false
   for _, arg in ipairs(argv) do
     if arg == "--startup" then
       startup = true
-    elseif TARGETS[arg] then
-      targetName = arg
+    elseif ROLES[arg] then
+      roleName = arg
     else
       printError("Unknown argument: " .. arg)
-      print("Usage: install [miner|monitor] [--startup]")
+      print("Usage: install [miner|monitor|follower] [--startup]")
       return false
     end
   end
-  targetName = targetName or (turtle and "miner" or "monitor")
-  local target = TARGETS[targetName]
+  roleName = roleName or (turtle and "miner" or "monitor")
+  local role = ROLES[roleName]
 
-  print("Downloading " .. target.source .. " ...")
-  local body, err = download(BASE_URL .. target.source)
-  if not body then
-    printError("Download failed: " .. tostring(err))
-    return false
+  -- Download and check everything first, then write: no half installs
+  local contents = {}
+  for name, path in pairs(role.files) do
+    print("Downloading " .. name .. " ...")
+    local body, err = download(baseUrl() .. path)
+    if not body then
+      printError("Download of " .. name .. " failed: " .. tostring(err))
+      return false
+    end
+    -- Refuse obviously broken downloads (e.g. an HTML error page)
+    local chunk, syntaxErr = load(body, "=" .. name, "t", {})
+    if not chunk then
+      printError(name .. " is not valid Lua: " .. tostring(syntaxErr))
+      return false
+    end
+    contents[name] = body
   end
-  -- Refuse obviously broken downloads (e.g. an HTML error page)
-  local chunk, syntaxErr = load(body, "=" .. target.program, "t", {})
-  if not chunk then
-    printError("Downloaded file is not valid Lua: " .. tostring(syntaxErr))
-    return false
+  for name, body in pairs(contents) do
+    local ok, err = writeFile(name, body)
+    if not ok then
+      printError("Cannot write " .. name .. ": " .. tostring(err))
+      return false
+    end
   end
-  local ok, writeErr = writeFile(target.program .. ".lua", body)
-  if not ok then
-    printError("Cannot write " .. target.program .. ".lua: " .. tostring(writeErr))
-    return false
-  end
-  print("Installed as '" .. target.program .. "'")
+  print("Installed role '" .. roleName .. "', start it with '" .. role.program .. "'")
 
   if startup then
     if fs.exists("startup.lua") then
       printError("startup.lua exists already, not overwriting it")
     else
-      local line = string.format('shell.run("%s")\n', target.program)
-      local okStartup, startupErr = writeFile("startup.lua", line)
-      if okStartup then
+      local line = string.format('shell.run("%s")\n', role.program)
+      local ok, err = writeFile("startup.lua", line)
+      if ok then
         print("Created startup.lua")
       else
-        printError("Cannot write startup.lua: " .. tostring(startupErr))
+        printError("Cannot write startup.lua: " .. tostring(err))
       end
     end
   end

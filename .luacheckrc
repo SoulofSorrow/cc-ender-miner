@@ -3,11 +3,11 @@ std = "lua51"
 max_line_length = 120
 read_globals = {
   "turtle", "rednet", "peripheral", "term", "colors", "colours", "fs", "textutils",
-  "parallel", "sleep", "read", "write", "printError", "keys", "window", "http", "shell",
+  "parallel", "sleep", "read", "write", "printError", "keys", "window", "http", "shell", "gps", "settings",
   os = { fields = { "getComputerID", "getComputerLabel", "epoch", "pullEvent", "pullEventRaw", "startTimer", "cancelTimer", "clock", "time", "date" } },
 }
 files["tests/"] = {
   std = "lua51+lua52",
   globals = { "turtle", "rednet", "peripheral", "term", "colors", "colours", "fs", "textutils",
-    "parallel", "sleep", "read", "write", "print", "printError", "keys", "window", "os" },
+    "parallel", "sleep", "read", "write", "print", "printError", "keys", "window", "os", "gps", "settings", "http", "shell" },
 }

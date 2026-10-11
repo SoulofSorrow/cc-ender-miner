@@ -18,3 +18,11 @@ miner.cfg
 *~
 .DS_Store
 Thumbs.db
+
+# Job state written by the miner when run outside of Minecraft
+miner.state
+miner.pos
+startup/
+follower.pos
+follower.cfg
+*.new

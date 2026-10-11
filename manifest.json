@@ -1,0 +1,16 @@
+{
+  "version": "1.4.0",
+  "stateFormat": 1,
+  "files": {
+    "miner.lua": "src/miner.lua",
+    "minermon.lua": "src/minermon.lua",
+    "follower.lua": "src/follower.lua",
+    "update.lua": "src/update.lua",
+    "install.lua": "src/install.lua"
+  },
+  "roles": {
+    "miner": ["miner.lua", "update.lua"],
+    "monitor": ["minermon.lua", "update.lua"],
+    "follower": ["follower.lua", "miner.lua", "update.lua"]
+  }
+}

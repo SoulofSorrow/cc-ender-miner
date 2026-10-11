@@ -4,7 +4,7 @@ package.path = "tests/?.lua;" .. package.path
 io.stdout:setvbuf("no")
 local out = io.write
 local filter = arg and arg[1] or nil
-local suites = { "test_miner", "test_monitor" }
+local suites = { "test_miner", "test_monitor", "test_resume", "test_follower", "test_update" }
 
 local passed, failed = 0, 0
 for _, suiteName in ipairs(suites) do

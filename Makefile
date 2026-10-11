@@ -5,8 +5,10 @@
 #   make release                check, build, tag v$(VERSION), push the tag
 #                               and create a GitHub release with dist/ files
 #
-# The version is read from src/miner.lua and must match src/minermon.lua
-# and have an entry in CHANGELOG.md.
+# The version is read from src/miner.lua and must match the other programs
+# and manifest.json, and have an entry in CHANGELOG.md. The auto updater on
+# the turtles reads manifest.json from the main branch, so a release is
+# picked up as soon as it is pushed there.
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -20,10 +22,12 @@ REMOTE   ?= origin
 
 SRC_DIR  := src
 DIST_DIR := dist
-SOURCES  := $(SRC_DIR)/miner.lua $(SRC_DIR)/minermon.lua $(SRC_DIR)/install.lua
+SOURCES  := $(SRC_DIR)/miner.lua $(SRC_DIR)/minermon.lua $(SRC_DIR)/follower.lua \
+            $(SRC_DIR)/update.lua $(SRC_DIR)/install.lua
 
 VERSION     := $(shell sed -n 's/^local VERSION = "\(.*\)"/\1/p' $(SRC_DIR)/miner.lua)
-MON_VERSION := $(shell sed -n 's/^local VERSION = "\(.*\)"/\1/p' $(SRC_DIR)/minermon.lua)
+# Every program and the manifest must carry the same version
+VERSIONED   := $(SRC_DIR)/minermon.lua $(SRC_DIR)/follower.lua $(SRC_DIR)/update.lua
 TAG         := v$(VERSION)
 
 .PHONY: help lint format format-check test check build clean version-check tag release
@@ -49,7 +53,7 @@ check: lint format-check test ## Lint, format check and tests
 build: check ## Copy the programs into dist/
 	@rm -rf $(DIST_DIR)
 	@mkdir -p $(DIST_DIR)
-	cp $(SOURCES) $(DIST_DIR)/
+	cp $(SOURCES) manifest.json $(DIST_DIR)/
 	@echo "Built $(TAG) into $(DIST_DIR)/"
 
 clean: ## Remove build output
@@ -57,8 +61,13 @@ clean: ## Remove build output
 
 version-check: ## Verify version numbers and changelog entry
 	@if [ -z "$(VERSION)" ]; then echo "error: no VERSION found in $(SRC_DIR)/miner.lua" >&2; exit 1; fi
-	@if [ "$(VERSION)" != "$(MON_VERSION)" ]; then \
-		echo "error: miner.lua is $(VERSION) but minermon.lua is $(MON_VERSION)" >&2; exit 1; fi
+	@for f in $(VERSIONED); do \
+		v=$$(sed -n 's/^local VERSION = "\(.*\)"/\1/p' $$f); \
+		if [ "$$v" != "$(VERSION)" ]; then \
+			echo "error: miner.lua is $(VERSION) but $$f is $$v" >&2; exit 1; fi; \
+	done
+	@if ! grep -q '"version": "$(VERSION)"' manifest.json; then \
+		echo "error: manifest.json does not list version $(VERSION)" >&2; exit 1; fi
 	@if ! grep -q "^## \[$(VERSION)\]" CHANGELOG.md; then \
 		echo "error: CHANGELOG.md has no entry for $(VERSION)" >&2; exit 1; fi
 	@echo "Version $(VERSION) OK"
@@ -74,5 +83,5 @@ tag: version-check ## Create and push the git tag v$(VERSION)
 release: build tag ## Tag, push and create a GitHub release with dist/ files
 	@command -v $(GH) >/dev/null || { echo "error: GitHub CLI '$(GH)' not found" >&2; exit 1; }
 	@awk '/^## \[$(VERSION)\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md > $(DIST_DIR)/RELEASE_NOTES.md
-	$(GH) release create "$(TAG)" $(DIST_DIR)/*.lua \
+	$(GH) release create "$(TAG)" $(DIST_DIR)/*.lua $(DIST_DIR)/manifest.json \
 		--title "$(TAG)" --notes-file $(DIST_DIR)/RELEASE_NOTES.md
