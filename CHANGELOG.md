@@ -28,6 +28,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
   longer applies to them.
 - Level buttons of the station use shorter labels so they fit on small
   screens.
+- `make release` works without a GitHub CLI login: it pushes the branch and
+  the tag, then opens the release page in the browser with tag, title and
+  notes filled in. With `gh` logged in or `GH_TOKEN` set it creates the
+  release as before. `RELEASE_MODE=gh|browser` forces one way.
 
 ## [2.1.0] - 2026-10-12
 

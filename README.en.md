@@ -471,7 +471,8 @@ installed version.
 make check      # luacheck, StyLua check, offline tests
 make format     # format the code
 make build      # copy the programs into dist/
-make release    # create tag v<VERSION>, push it and create a GitHub release
+make release    # push branch and tag v<VERSION>, create a GitHub release
+                # (without a gh login the release page opens in the browser)
 ```
 
 The tests simulate the world, turtle, ender chests and rednet

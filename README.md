@@ -486,7 +486,8 @@ Version weiter.
 make check      # luacheck, StyLua-Prüfung, Offline-Tests
 make format     # formatieren
 make build      # Programme nach dist/ kopieren
-make release    # Tag v<VERSION> erstellen, pushen und GitHub-Release anlegen
+make release    # Branch und Tag v<VERSION> pushen, GitHub-Release anlegen
+                # (ohne gh-Login: Release-Seite öffnet sich im Browser)
 ```
 
 Die Tests simulieren Welt, Turtle, Ender Chests und Rednet (`tests/mock_cc.lua`)

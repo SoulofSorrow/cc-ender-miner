@@ -8,7 +8,8 @@ Thanks for helping to improve cc-ender-miner!
 - [luacheck](https://github.com/lunarmodules/luacheck)
 - [StyLua](https://github.com/JohnnyMorganz/StyLua)
 - [pre-commit](https://pre-commit.com/) (recommended)
-- [GitHub CLI](https://cli.github.com/) for releases
+- [GitHub CLI](https://cli.github.com/) for releases (optional, without it the
+  release page opens in the browser)
 
 ## Workflow
 
@@ -54,3 +55,10 @@ break older monitors or turtles must bump it in both programs.
 
 Maintainers bump `VERSION` in `src/miner.lua` and `src/minermon.lua`, move the
 changelog entries into a new version section, commit, and run `make release`.
+
+`make release` pushes the branch and the tag `v<VERSION>`. If the GitHub CLI
+is logged in or `GH_TOKEN` is set, it creates the release with the files from
+`dist/`. Otherwise it opens the release page in the browser with tag, title
+and notes filled in, and the files from `dist/` have to be dropped in by hand.
+`make release-check` shows which way will be used, `RELEASE_MODE=gh` or
+`RELEASE_MODE=browser` forces one.
