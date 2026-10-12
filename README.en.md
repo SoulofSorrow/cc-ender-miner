@@ -5,9 +5,14 @@
 Tunnel mining for [CC: Tweaked](https://tweaked.cc/) mining turtles with two
 ender chests and a live dashboard on a monitor.
 
-- **Turtle (`miner`)** digs parallel tunnels of any size, places torches,
-  drops cobblestone and similar junk, and sends everything else home through
-  an ender chest.
+- **Ore mode (`miner`, mode `ores`)**: the turtle uses the **geo scanner**
+  from Advanced Peripherals to find ores on several Y levels and mines only
+  those. It never drives a way twice and keeps its own chunk loaded with the
+  **chunky turtle** upgrade. See [Ore mode](#ore-mode-geo-scanner). Tuned for
+  **FTB Evolution** (Minecraft 1.21.1).
+- **Tunnel mode (`miner`, mode `tunnel`)** digs parallel tunnels of any size,
+  places torches, drops cobblestone and similar junk, and sends everything
+  else home through an ender chest.
 - **Supply chest**: a second ender chest delivers torches (and optionally
   coal). The turtle restocks on its own.
 - **Dashboard (`minermon`)** on a computer with an ender modem and a 4x4
@@ -17,10 +22,151 @@ ender chests and a live dashboard on a monitor.
 - **Follower (`follower`)**: optional second turtle with a chunk loader
   upgrade that follows the miner and keeps its chunk loaded. Off by default,
   the miner also works on its own.
+- **Station (`station`, `miner dock`)**: a computer with a touch monitor
+  hands out ore jobs to the docked turtle through a disk drive. The turtle
+  unloads and refuels at the station and takes the next job. See
+  [Station](#station-jobs-from-a-touch-monitor).
 - **Auto update (`update`)**: all programs keep themselves up to date when
   they start.
 
 Rewritten from scratch, inspired by the "Mining Turtle 3.5" script by PrinceTommen.
+
+## Ore mode (geo scanner)
+
+The turtle digs a shaft down to the first level and drives a grid of scan
+points in a serpentine. At each point it briefly swaps its pickaxe for the geo
+scanner, scans a sphere with radius 8 and then mines the ores of that section
+on the shortest round trip. From the last point of a level it goes straight
+down to the next level, which it drives in reverse. No way is driven twice.
+
+**What you need (included in FTB Evolution):**
+
+| Part | Where |
+| --- | --- |
+| Mining turtle (pickaxe) | pickaxe on the right side (configurable) |
+| Chunky turtle upgrade (Advanced Peripherals, "chunk controller") | other side of the turtle, keeps the chunk loaded |
+| Geo scanner (Advanced Peripherals) | slot 3, only equipped for scanning |
+| 2 EnderStorage ender chests | slot 1 (supply: coal), slot 2 (resources) |
+| Coal | slot 4 |
+
+An ender modem is **not needed**. Without one there is just no live
+dashboard; the turtle shows its state on its own screen.
+
+**Start:**
+
+1. Place the turtle at the start, facing the mining area. The area lies in
+   front of it and extends to the chosen side.
+2. Run `miner setup` and enter:
+   - **Mode:** `ores`
+   - **The turtle's Y:** read it from F3. This is the only coordinate it needs.
+   - **Ores:** pick them from the list, e.g. `1,4` for diamond and iron.
+   - **Area size, side and return home** at the end.
+3. Press Enter. It scans twice first to work out its direction.
+
+**Level presets** (ore distribution since Minecraft 1.18, still valid in 1.21):
+
+| No. | Ore | Y |
+| --- | --- | --- |
+| 1 | Diamond + redstone | −57 |
+| 2 | Gold | −16 |
+| 3 | Lapis | 0 |
+| 4 | Iron | 16 |
+| 5 | Copper | 48 |
+| 6 | Coal | 96 |
+
+Each level covers a band 9 blocks high (Y −4 to +4). **All ores** in the band
+are mined, including modded ores with the `c:ores` tag (Mekanism, Immersive
+Engineering, ...). Use `oreGroups` to limit it to certain **kinds of ore**,
+e.g. `{ "diamond", "osmium" }`. A kind covers every variant (stone,
+deepslate, nether) from every mod. The setup wizard asks for it and the
+station has a screen for it. `oreNames` filters by exact block ids instead.
+
+**Restart safe:** position, level, scan point and the list of ores still to
+mine are saved continuously. After a restart the turtle puts its pickaxe back
+if it was scanning. An interrupted turn is resolved **without GPS**: it scans,
+moves one block and compares the two scans.
+
+**Simulation results** (45×45 area, 2 levels): all 918 ores in the area were
+mined while digging only 5 % of the volume. Only 6 % of the moves went through
+cells visited before.
+
+**Please check on first use:** the simulation assumes that the geo scanner
+returns relative coordinates and has a short cooldown between scans. That is
+what the Advanced Peripherals source code says, but it has not been tested in
+the real game yet. If the scanner returns something unexpected, the turtle
+stops with a clear message instead of digging in the wrong place.
+
+## Station (jobs from a touch monitor)
+
+Instead of typing every job on the turtle, the turtle gets a fixed
+**station**. You create ore jobs on a touch monitor, the turtle takes them one
+after the other, mines its area, comes back, unloads, refuels and reports the
+result.
+
+### Layout
+
+Seen from above (the turtle faces north, the mining direction):
+
+```
+            mining direction
+                  ^
+   [Monitor]
+   [Computer][Drive][Turtle]
+```
+
+- **Turtle**: mining turtle with a pickaxe, the geo scanner in slot 3 and the
+  ender chests in slots 1 and 2 as in the [ore mode](#ore-mode-geo-scanner).
+- **Chest above the turtle**: output. After every job the turtle unloads
+  slots 5-16 into it (hoppers or pipes can move it on).
+- **Chest below the turtle**: fuel. The turtle refuels from it up to
+  `dockFuel` (default 5000) and takes a stack along in slot 4.
+- **Disk drive with a floppy disk** between the computer and the turtle (on
+  one side of the turtle, not in front). Station and turtle exchange jobs and
+  reports through the disk, no modem needed.
+- **Computer** (advanced) with an **advanced monitor** (2x2 or larger, 3x3 or
+  4x4 is nicer) on any side. Without a monitor you click on the screen of the
+  advanced computer instead.
+- The block in front of the turtle must be diggable, the shaft starts there.
+
+### Installation and start
+
+```sh
+install station --startup     # on the computer (also gets miner.lua)
+install miner                 # on the turtle
+```
+
+1. Start `station` and enter the Y of the turtle once (F3).
+2. Run `miner dock` on the turtle. It creates `startup/endermine-dock.lua` and
+   waits at the station again after every reboot. Press **Q** to leave the
+   dock mode, which also removes the startup file.
+
+### Using it
+
+- **NEW JOB**: tap the levels (several at once, presets per ore), optionally
+  an **own Y level** (`Own Y`, set with `--`/`-`/`+`/`++` and switch it
+  `ON`, e.g. for modded ores), set the area size (18-90, step 9) and the
+  number of areas (1-9), then **CREATE**.
+- **ORES**: choose kinds of ore. Without a choice every ore is mined, with a
+  choice only those kinds, in every variant. For vanilla ores the matching
+  level is selected as well. **Modded ores** appear in the list as soon as
+  the turtle has scanned them during a job (even if it did not mine them).
+  Page through the list with `<` and `>`.
+- **CANCEL** cancels the newest job the turtle has not taken yet.
+- The main page shows the turtle (state, fuel, ores of the last job), the
+  job list and a map of the areas.
+
+Areas are given out **in a spiral around the station**: the first one in
+front and to the right of the turtle, then ring by ring outwards. No area is
+given out twice; the area of a cancelled job is used again.
+
+### Restart safety
+
+Everything is kept in files: the jobs in `station.db` on the computer, the
+running job in `miner.state` on the turtle, and the last job the turtle took
+in `dock.state`. After a chunk unload the turtle finishes the job it started,
+reports the result and takes the next one. A job is never taken twice. The
+result of the last job is part of every report, so the station does not miss
+it even if it was not running at that moment.
 
 ## Requirements
 
@@ -75,6 +221,7 @@ wget https://raw.githubusercontent.com/SoulofSorrow/cc-ender-miner/main/src/inst
 install monitor --startup     # hub computer
 install miner                 # mining turtle
 install follower              # follower turtle (also gets miner.lua for the geometry)
+install station               # station computer (also gets miner.lua)
 ```
 
 Every role also gets `update.lua`, the auto updater. You can also copy the
@@ -163,6 +310,17 @@ for 15 seconds are shown as **NO SIGNAL**.
 | `controllerId` | `nil` | Id of the dashboard computer. `nil` broadcasts and accepts commands from anyone |
 | `returnOnError` | `true` | Return to the start after an error |
 | `useFollower` | `false` | Work together with a follower turtle (chunk loader) |
+| `mode` | `"tunnel"` | `"ores"` for the ore mode with the geo scanner |
+| `startY` | – | Ore mode: Y of the start block (F3) |
+| `oreLevels` | `{ -57, 16 }` | Ore mode: Y levels |
+| `areaWidth` / `areaLength` | 45 / 45 | Ore mode: size of the area |
+| `scanRadius` | 8 | Ore mode: scan radius (8 is free) |
+| `oreNames` | `{}` | Ore mode: only these block ids, empty = every ore |
+| `oreGroups` | `{}` | Ore mode: only these kinds of ore (`"diamond"`, `"osmium"`, ...), empty = every ore |
+| `toolSide` | `"right"` | Ore mode: side of the pickaxe |
+| `returnHome` | `true` | Ore mode: drive back to the start at the end |
+| `areaOffsetX` / `areaOffsetZ` | 0 / 0 | Ore mode: offset of the area (set by the station) |
+| `dockFuel` | 5000 | Dock mode: fuel level the turtle refuels to at the station |
 
 ## Failure handling
 

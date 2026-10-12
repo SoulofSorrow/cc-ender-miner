@@ -6,6 +6,76 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-12
+
+### Added
+
+- `station`: choose kinds of ore per job on an ORES screen. Without a choice
+  every ore is mined as before. Ores of other mods are added to the list as
+  soon as the turtle has scanned them, choosing a vanilla ore selects its
+  level as well.
+- `station`: own Y level per job (`Own Y`), e.g. for modded ores.
+- `station`: warns when the turtle runs a different version.
+- `miner`: setting `oreGroups` mines only certain kinds of ore. A kind covers
+  every variant of an ore (stone, deepslate, nether, any mod), e.g.
+  `diamond` or `osmium`. The setup wizard asks for it.
+- `miner`: reports every kind of ore the geo scanner saw, also the ones it
+  did not mine.
+
+### Changed
+
+- Station jobs decide alone what is mined; `oreNames` from `miner.cfg` no
+  longer applies to them.
+- Level buttons of the station use shorter labels so they fit on small
+  screens.
+
+## [2.1.0] - 2026-10-12
+
+### Added
+
+- `station`: job station for a computer with a touch monitor (or the screen
+  of an advanced computer). Ore jobs are created by tapping the ores, the
+  area size and the number of areas, queued in `station.db` and handed to
+  the docked turtle one at a time through a floppy disk. Areas are given out
+  in a spiral around the station, so no area is mined twice. Shows the state
+  of the turtle, the job list and a map of the areas.
+- `miner dock`: dock mode. The turtle waits at the station, takes the next
+  job, mines it in ore mode, unloads into the chest above, refuels from the
+  chest below (`dockFuel`) and reports the result. It resumes a job after a
+  reboot and never takes a job twice.
+- Ore mode settings `areaOffsetX` and `areaOffsetZ` move the area away from
+  the start block.
+- `install station` and the role `station` for the updater.
+- Tests for the station screens, the job protocol and the dock mode,
+  including unloads in the middle of a queue.
+
+## [2.0.0] - 2026-10-11
+
+### Added
+
+- Ore mode (`mode = "ores"`): the miner uses the Advanced Peripherals geo
+  scanner to find ores on several Y levels and mines only those. Scan points
+  are spaced so the scan spheres cover each level band completely, levels are
+  driven as alternating serpentines connected by vertical shafts, and the ores
+  of each cell are visited on a nearest-neighbour tour improved with 2-opt.
+- Level presets for the vanilla ores of Minecraft 1.18+ (diamond/redstone,
+  gold, lapis, iron, copper, coal); every ore with the `c:ores` tag is mined,
+  so modded ores are included. `oreNames` limits it to certain blocks.
+- The pickaxe and the geo scanner share one upgrade slot and are swapped for
+  each scan, so the other slot can hold the chunky turtle upgrade.
+- Restart safety without GPS: the direction is calibrated with two scans at
+  the start, and an interrupted turn is resolved by scanning, moving one
+  block and comparing the scans. A reboot while scanning puts the pickaxe
+  back.
+- The setup wizard asks for the mode, the start Y and the ores.
+- Tests for the ore mode with a simulated geo scanner, including an unload at
+  hundreds of points of a job.
+
+### Changed
+
+- The ender modem is optional; without it the turtle only shows its state on
+  its own screen.
+
 ## [1.4.0] - 2026-10-11
 
 ### Added
@@ -101,7 +171,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Offline simulation tests, luacheck, StyLua, pre-commit hooks and a Makefile
   for building, testing and releasing.
 
-[Unreleased]: https://github.com/SoulofSorrow/cc-ender-miner/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/SoulofSorrow/cc-ender-miner/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/SoulofSorrow/cc-ender-miner/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/SoulofSorrow/cc-ender-miner/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/SoulofSorrow/cc-ender-miner/compare/v1.4.0...v2.0.0
 [1.4.0]: https://github.com/SoulofSorrow/cc-ender-miner/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/SoulofSorrow/cc-ender-miner/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/SoulofSorrow/cc-ender-miner/compare/v1.1.0...v1.2.0

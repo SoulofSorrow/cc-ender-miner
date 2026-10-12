@@ -2,7 +2,7 @@
 -- Copyright (C) 2026 Julian Schäfer
 -- SPDX-License-Identifier: GPL-3.0-or-later
 --
--- Usage:  update [miner|monitor|follower] [--force]
+-- Usage:  update [miner|monitor|follower|station] [--force]
 --
 -- The other programs load this file as a library ("--lib") and call
 -- autoUpdate() when they start. Updates come from manifest.json in the
@@ -10,7 +10,7 @@
 --   endermine.auto_update  false disables the automatic check (default true)
 --   endermine.update_url   base URL of the repository files
 
-local VERSION = "1.4.0"
+local VERSION = "2.2.0"
 local DEFAULT_URL = "https://raw.githubusercontent.com/SoulofSorrow/cc-ender-miner/main/"
 local MANIFEST = "manifest.json"
 local SETTING_URL = "endermine.update_url"
@@ -164,7 +164,7 @@ local function writeAll(contents)
 end
 
 ---@class UpdateOptions
----@field role string "miner", "monitor" or "follower"
+---@field role string "miner", "monitor", "follower" or "station"
 ---@field current string Version of the calling program
 ---@field stateFormat integer|nil Save format of a running job
 ---@field jobActive boolean|nil A job is saved and waits to be resumed
@@ -270,6 +270,8 @@ end
 local function detectRole()
   if fs.exists("follower.lua") then
     return "follower"
+  elseif fs.exists("station.lua") then
+    return "station"
   elseif turtle then
     return "miner"
   end
@@ -282,11 +284,11 @@ local function main(argv)
   for _, arg in ipairs(argv) do
     if arg == "--force" then
       force = true
-    elseif arg == "miner" or arg == "monitor" or arg == "follower" then
+    elseif arg == "miner" or arg == "monitor" or arg == "follower" or arg == "station" then
       role = arg
     else
       printError("Unknown argument: " .. arg)
-      print("Usage: update [miner|monitor|follower] [--force]")
+      print("Usage: update [miner|monitor|follower|station] [--force]")
       return
     end
   end
@@ -294,7 +296,7 @@ local function main(argv)
   local current = "0.0.0"
   if not force then
     -- The version of the installed main program decides
-    local files = { miner = "miner.lua", monitor = "minermon.lua", follower = "follower.lua" }
+    local files = { miner = "miner.lua", monitor = "minermon.lua", follower = "follower.lua", station = "station.lua" }
     local handle = fs.exists(files[role]) and fs.open(files[role], "r") or nil
     if handle then
       local text = handle.readAll() or ""

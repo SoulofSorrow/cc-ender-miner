@@ -15,7 +15,7 @@
 -- Coordinates are the miner's job coordinates: the miner starts at 0/0/0,
 -- the follower at 0/0/-1.
 
-local VERSION = "1.4.0"
+local VERSION = "2.2.0"
 local PROTOCOL = "endermine.v1"
 local CONFIG_FILE = "follower.cfg"
 local STATE_FILE = "follower.pos"

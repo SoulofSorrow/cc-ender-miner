@@ -2,7 +2,7 @@
 -- Copyright (C) 2026 Julian Schäfer
 -- SPDX-License-Identifier: GPL-3.0-or-later
 --
--- Usage:  install [miner|monitor|follower] [--startup]
+-- Usage:  install [miner|monitor|follower|station] [--startup]
 -- Without a role, turtles get the miner and computers get the monitor.
 -- Every role also gets the updater (update.lua), which keeps the programs
 -- current from then on.
@@ -30,6 +30,14 @@ local ROLES = {
       ["update.lua"] = "src/update.lua",
     },
     program = "follower",
+  },
+  station = {
+    files = {
+      ["station.lua"] = "src/station.lua",
+      ["miner.lua"] = "src/miner.lua",
+      ["update.lua"] = "src/update.lua",
+    },
+    program = "station",
   },
 }
 
@@ -94,7 +102,7 @@ local function main(argv)
       roleName = arg
     else
       printError("Unknown argument: " .. arg)
-      print("Usage: install [miner|monitor|follower] [--startup]")
+      print("Usage: install [miner|monitor|follower|station] [--startup]")
       return false
     end
   end

@@ -7,6 +7,7 @@ local Mock = {}
 local unpackFn = table.unpack or unpack
 
 local CHEST = "enderstorage:ender_chest"
+local PLAIN_CHEST = "minecraft:chest"
 local MAX_STACK = 64
 local CHEST_SLOTS = 27
 
@@ -30,6 +31,7 @@ local GRAVITY = { ["minecraft:gravel"] = true, ["minecraft:sand"] = true }
 local DELTA = { [0] = { 0, 1 }, [1] = { 1, 0 }, [2] = { 0, -1 }, [3] = { -1, 0 } }
 
 Mock.CHEST = CHEST
+Mock.PLAIN_CHEST = PLAIN_CHEST
 
 Mock.colors = {
   white = 1,
@@ -281,6 +283,8 @@ end
 ---@field id integer|nil
 ---@field label string|nil
 ---@field gps table|nil Absolute GPS frame {x, y, z, dir}
+---@field worldDir string|nil Compass direction of the turtle's facing 0 for the geo scanner
+---@field requireTool boolean|nil Digging needs a pickaxe on one side
 
 ---@param opts MockOptions|nil
 ---@return table env
@@ -314,7 +318,18 @@ function Mock.new(opts)
   end
   -- All turtle functions work on "t", the turtle whose API was called last
   -- (see bindApi). The first turtle is env.turtle.
-  local t = { x = 0, y = 0, z = 0, f = 0, inv = {}, sel = 1, fuel = opts.fuel or 5000, limit = 20000 }
+  local t = {
+    x = 0,
+    y = 0,
+    z = 0,
+    f = 0,
+    inv = {},
+    sel = 1,
+    fuel = opts.fuel or 5000,
+    limit = 20000,
+    left = "advancedperipherals:chunk_controller",
+    right = "minecraft:diamond_pickaxe",
+  }
   local primary = t
   env.turtle = t
   env.turtles = { t }
@@ -418,7 +433,14 @@ function Mock.new(opts)
   end
 
   local function chestAt(x, y, z)
-    if env.get(x, y, z) ~= CHEST then
+    local block = env.get(x, y, z)
+    if block == PLAIN_CHEST then
+      -- A normal chest keeps its own inventory at its position
+      local id = "chest@" .. key(x, y, z)
+      env.chests[id] = env.chests[id] or {}
+      return env.chests[id]
+    end
+    if block ~= CHEST then
       return nil
     end
     local freq = env.chestFreq[key(x, y, z)] or "default"
@@ -433,6 +455,12 @@ function Mock.new(opts)
     local block = env.get(x, y, z)
     if isEmpty(block) then
       return false, "Nothing to dig here"
+    end
+    if opts.requireTool then
+      local hasPick = tostring(t.left):find("pickaxe") or tostring(t.right):find("pickaxe")
+      if not hasPick then
+        return false, "No tool to dig with"
+      end
     end
     if block == "minecraft:bedrock" then
       return false, "Cannot break unbreakable block"
@@ -741,6 +769,27 @@ function Mock.new(opts)
     end
     return t.limit
   end
+  --- Swap the selected item with an equipped upgrade, like CC does.
+  local function equip(side)
+    beginAction("equip")
+    local stack = t.inv[t.sel]
+    if stack and stack.count ~= 1 then
+      maybeKill("after")
+      return false, "Not a valid upgrade"
+    end
+    local old = t[side]
+    t[side] = stack and stack.name or nil
+    t.inv[t.sel] = old and { name = old, count = 1 } or nil
+    env.equips = (env.equips or 0) + 1
+    maybeKill("after")
+    return true
+  end
+  api.equipLeft = function()
+    return equip("left")
+  end
+  api.equipRight = function()
+    return equip("right")
+  end
   --- Wrap the API so every call acts on one particular turtle.
   ---@param turtleState table
   ---@return table
@@ -788,6 +837,27 @@ function Mock.new(opts)
       env.chests[freq][i] = { name = stack[1], count = stack[2] }
     end
   end
+
+  --- Place a normal chest and return the name of its inventory.
+  ---@param x integer
+  ---@param y integer
+  ---@param z integer
+  ---@param stacks table|nil {{name, count}, ...}
+  ---@return string id Inventory name for env.chestCount
+  function env.placeChest(x, y, z, stacks)
+    env.set(x, y, z, PLAIN_CHEST)
+    local id = "chest@" .. key(x, y, z)
+    env.chests[id] = {}
+    for i, stack in ipairs(stacks or {}) do
+      env.chests[id][i] = { name = stack[1], count = stack[2] }
+    end
+    return id
+  end
+
+  --- Disk drive next to the computer: env.drive = { mount, present, data }
+  --- or nil when there is none.
+  env.drive = nil
+  env.timers = 0
 
   --- Count items of a name in an ender chest frequency.
   function env.chestCount(freq, name)
@@ -887,6 +957,13 @@ function Mock.new(opts)
     end
     os.pullEvent = function(filter)
       return coroutine.yield(filter)
+    end
+    os.pullEventRaw = os.pullEvent
+    os.startTimer = function(seconds)
+      env.timers = env.timers + 1
+      env.clock = env.clock + (seconds or 0)
+      env.queue[#env.queue + 1] = { "timer", env.timers }
+      return env.timers
     end
     _G.fs = {
       exists = function(path)
@@ -994,15 +1071,90 @@ function Mock.new(opts)
         return true
       end,
     }
+    -- Geo scanner of the first turtle: a sphere scan in world axes
+    local compass = { north = { 0, -1 }, east = { 1, 0 }, south = { 0, 1 }, west = { -1, 0 } }
+    local worldDir = compass[opts.worldDir or "north"]
+    env.scanReadyAt = 0
+    env.scans = 0
+    local function scanner()
+      return {
+        scan = function(radius)
+          if env.clock < env.scanReadyAt then
+            return nil, "scanCooldown"
+          end
+          env.scanReadyAt = env.clock + 2
+          env.scans = env.scans + 1
+          local p = env.turtle
+          local out = {}
+          for dx = -radius, radius do
+            for dy = -radius, radius do
+              for dz = -radius, radius do
+                if dx * dx + dy * dy + dz * dz <= radius * radius and not (dx == 0 and dy == 0 and dz == 0) then
+                  local name = env.get(p.x + dx, p.y + dy, p.z + dz)
+                  if name ~= "air" and name ~= "turtle" then
+                    -- Job offset (dx, dz) to world axes; job +x is facing 1
+                    local wx = dz * worldDir[1] + dx * -worldDir[2]
+                    local wz = dz * worldDir[2] + dx * worldDir[1]
+                    local tags = {}
+                    if name:find("_ore$") then
+                      tags = { "c:ores", "minecraft:mineable/pickaxe" }
+                    end
+                    out[#out + 1] = { name = name, tags = tags, x = wx, y = dy, z = wz }
+                  end
+                end
+              end
+            end
+          end
+          return out
+        end,
+      }
+    end
     _G.peripheral = {
       find = function(kind, filter)
         if kind == "modem" and opts.modem and (filter == nil or filter("back", modem)) then
           return modem
         end
+        if kind == "drive" and env.drive then
+          local d = env.drive
+          local drive = {
+            isDiskPresent = function()
+              return d.present ~= false
+            end,
+            hasData = function()
+              return d.present ~= false and d.data ~= false
+            end,
+            getMountPath = function()
+              if d.present == false or d.data == false then
+                return nil
+              end
+              return d.mount or "disk"
+            end,
+            setDiskLabel = function(label)
+              d.label = label
+            end,
+          }
+          if filter == nil or filter("left", drive) then
+            return drive
+          end
+        end
         return nil
       end,
       getName = function()
         return "back"
+      end,
+      getType = function(side)
+        local item = env.turtle[side]
+        if type(item) == "string" and item:find("geo_scanner") then
+          return "geoScanner"
+        end
+        return nil
+      end,
+      wrap = function(side)
+        local item = env.turtle[side]
+        if type(item) == "string" and item:find("geo_scanner") then
+          return scanner()
+        end
+        return nil
       end,
     }
     local open = {}
@@ -1033,7 +1185,6 @@ function Mock.new(opts)
     if opts.gps then
       -- Absolute world frame: start block at opts.gps.{x,y,z}, relative
       -- facing 0 points to compass direction opts.gps.dir
-      local compass = { north = { 0, -1 }, east = { 1, 0 }, south = { 0, 1 }, west = { -1, 0 } }
       local d = compass[opts.gps.dir or "north"]
       _G.gps = {
         locate = function()

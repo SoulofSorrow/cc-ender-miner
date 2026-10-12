@@ -6,7 +6,7 @@
 -- monitor, e.g. 4x4 blocks. Shows the telemetry of every turtle running
 -- miner.lua and sends pause/resume/home commands on touch.
 
-local VERSION = "1.4.0"
+local VERSION = "2.2.0"
 local PROTOCOL = "endermine.v1"
 local DEFAULT_SCALE = 0.5
 local STALE_AFTER = 15
@@ -709,6 +709,18 @@ local function createApp(mon, opts)
     })
     add({ kind = "kv", key = "Uptime", value = fmtDuration(s.uptime) })
     local job = type(s.job) == "table" and s.job or nil
+    if job and job.mode == "ores" then
+      local levels = {}
+      for _, y in ipairs(type(job.oreLevels) == "table" and job.oreLevels or {}) do
+        levels[#levels + 1] = tostring(y)
+      end
+      add({
+        kind = "kv",
+        key = "Job",
+        value = string.format("ores Y %s, %dx%d", table.concat(levels, ","), num(job.areaWidth), num(job.areaLength)),
+      })
+      job = nil
+    end
     if job then
       add({
         kind = "kv",

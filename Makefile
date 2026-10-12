@@ -23,11 +23,12 @@ REMOTE   ?= origin
 SRC_DIR  := src
 DIST_DIR := dist
 SOURCES  := $(SRC_DIR)/miner.lua $(SRC_DIR)/minermon.lua $(SRC_DIR)/follower.lua \
-            $(SRC_DIR)/update.lua $(SRC_DIR)/install.lua
+            $(SRC_DIR)/station.lua $(SRC_DIR)/update.lua $(SRC_DIR)/install.lua
 
 VERSION     := $(shell sed -n 's/^local VERSION = "\(.*\)"/\1/p' $(SRC_DIR)/miner.lua)
 # Every program and the manifest must carry the same version
-VERSIONED   := $(SRC_DIR)/minermon.lua $(SRC_DIR)/follower.lua $(SRC_DIR)/update.lua
+VERSIONED   := $(SRC_DIR)/minermon.lua $(SRC_DIR)/follower.lua $(SRC_DIR)/station.lua \
+               $(SRC_DIR)/update.lua
 TAG         := v$(VERSION)
 
 .PHONY: help lint format format-check test check build clean version-check tag release
