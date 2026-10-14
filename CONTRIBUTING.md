@@ -8,8 +8,7 @@ Thanks for helping to improve cc-ender-miner!
 - [luacheck](https://github.com/lunarmodules/luacheck)
 - [StyLua](https://github.com/JohnnyMorganz/StyLua)
 - [pre-commit](https://pre-commit.com/) (recommended)
-- [GitHub CLI](https://cli.github.com/) for releases (optional, without it the
-  release page opens in the browser)
+- [GitHub CLI](https://cli.github.com/) for releases
 
 ## Workflow
 
@@ -28,21 +27,15 @@ Thanks for helping to improve cc-ender-miner!
 - Handle failures explicitly: turtle actions return `false, reason` and must
   never be ignored silently.
 - No emojis in code, logs or on the turtle and monitor screens.
-- Keep the programs single files so they can be installed with `wget`. The
-  follower is the one exception: it loads the shared job geometry from
-  `miner.lua`, so geometry changes must keep both in sync.
-- Bump `VERSION` in every program and in `manifest.json` together; a change
-  to the saved job format must also bump `stateFormat` (miner `STATE_FORMAT`),
-  otherwise the auto updater would install a version that cannot resume a
-  running job.
+- `miner` is split into `src/miner.lua` and the modules in `src/endermine/`;
+  `src/install.lua` downloads all of them. A new module must be added to the
+  file list in `src/install.lua`.
+  `minermon.lua` stays a single file.
 
 ## Tests
 
-`tests/mock_cc.lua` simulates a voxel world with one or more turtles,
-EnderStorage chests, rednet, http, GPS and `parallel`. `tests/test_follower.lua`
-runs miner, follower and hub together with game time (0.4 s per action), and
-`tests/test_resume.lua` stops the turtle at hundreds of points to test the
-resume. New behaviour needs a test in `tests/test_miner.lua`
+`tests/mock_cc.lua` simulates a voxel world, a turtle, EnderStorage chests,
+rednet and `parallel`. New behaviour needs a test in `tests/test_miner.lua`
 or `tests/test_monitor.lua`. Run a single test with
 `lua tests/run.lua "part of the test name"`.
 
@@ -55,10 +48,3 @@ break older monitors or turtles must bump it in both programs.
 
 Maintainers bump `VERSION` in `src/miner.lua` and `src/minermon.lua`, move the
 changelog entries into a new version section, commit, and run `make release`.
-
-`make release` pushes the branch and the tag `v<VERSION>`. If the GitHub CLI
-is logged in or `GH_TOKEN` is set, it creates the release with the files from
-`dist/`. Otherwise it opens the release page in the browser with tag, title
-and notes filled in, and the files from `dist/` have to be dropped in by hand.
-`make release-check` shows which way will be used, `RELEASE_MODE=gh` or
-`RELEASE_MODE=browser` forces one.

@@ -427,4 +427,126 @@ test("foreign items in torch and fuel slots are moved away", function()
   H.check(env.turtle.inv[4] == nil or env.turtle.inv[4].name ~= "minecraft:stick", "slot 4 cleaned")
 end)
 
+test("lava ahead stops the job and returns home", function()
+  local env, miner = H.setup({
+    mock = {
+      generator = function(x, y, z)
+        if x == 1 and y == 1 and z == 6 then
+          return "minecraft:lava"
+        end
+        return "minecraft:stone"
+      end,
+    },
+  })
+  local ok, state, msg = miner.run()
+  H.check(not ok, "run should fail")
+  H.eq(state, "error", "state")
+  H.check(msg:find("lava"), "message should mention lava: " .. msg)
+  H.eq(env.get(1, 1, 6), "minecraft:lava", "lava must stay untouched")
+  H.assertHome(env)
+end)
+
+test("home command interrupts the wait for fuel", function()
+  local env, miner = H.setup({ mock = { fuel = 0, modem = true }, supply = {} })
+  miner.openTelemetry()
+  local sent = false
+  env.hooks.sleep = function(e)
+    if not sent and e.sleeps >= 3 then
+      sent = true
+      e.queueMessage(99, { type = "command", cmd = "home" }, "endermine.v1")
+    end
+  end
+  local result = {}
+  parallel.waitForAny(function()
+    result = { miner.run() }
+  end, miner.commandLoop)
+  H.check(sent, "turtle never waited for fuel")
+  H.eq(result[2], "aborted", "final state")
+end)
+
+test("commands need the shared secret when one is configured", function()
+  local env, miner = H.setup({
+    mock = { modem = true },
+    config = { tunnels = 1, length = 30, secret = "pairing-code" },
+  })
+  miner.openTelemetry()
+  env.hooks.move = function(e)
+    if e.moves == 10 then
+      e.queueMessage(5, { type = "command", cmd = "home" }, "endermine.v1")
+      e.queueMessage(5, { type = "command", cmd = "home", secret = "wrong" }, "endermine.v1")
+    elseif e.moves == 40 then
+      e.queueMessage(5, { type = "command", cmd = "home", secret = "pairing-code" }, "endermine.v1")
+    end
+  end
+  local result = {}
+  parallel.waitForAny(function()
+    result = { miner.run() }
+  end, miner.commandLoop)
+  H.eq(result[2], "aborted", "only the command with the secret may abort the job")
+  H.check(env.moves > 40, "commands without the secret must be ignored")
+end)
+
+test("secret validation", function()
+  local M = H.loadProgram(H.SRC .. "/miner.lua")
+  H.check(M.validateConfig(M.mergeConfig(M.DEFAULT_CONFIG, { secret = "x" })), "plain secret must be valid")
+  H.check(not M.validateConfig(M.mergeConfig(M.DEFAULT_CONFIG, { secret = "" })), "empty secret")
+  H.check(not M.validateConfig(M.mergeConfig(M.DEFAULT_CONFIG, { secret = 5 })), "numeric secret")
+end)
+
+test("unknown config keys are reported", function()
+  local env = Mock.new()
+  env.install()
+  local M = H.loadProgram(H.SRC .. "/miner.lua")
+  local _, unknown = M.mergeConfig(M.DEFAULT_CONFIG, { tunel = 2, width = 2, evil = true })
+  H.eq(table.concat(unknown, ","), "evil,tunel", "unknown keys")
+  env.files["typo.cfg"] = "{ tunel = 2 }"
+  local cfg, err, ignored = M.loadConfig("typo.cfg")
+  H.check(cfg, "config with typos still loads: " .. tostring(err))
+  H.eq(ignored[1], "tunel", "ignored key")
+end)
+
+test("an incomplete write keeps the last good file", function()
+  local env = Mock.new()
+  env.install()
+  local store = require("endermine.store")
+  H.check(store.writeAtomic("data.txt", "old content"), "first write")
+  local realOpen = fs.open
+  fs.open = function(path, mode)
+    local handle, err = realOpen(path, mode)
+    if mode == "w" and handle then
+      return {
+        write = function(text)
+          handle.write(text:sub(1, #text - 3))
+        end,
+        close = handle.close,
+      }
+    end
+    return handle, err
+  end
+  local ok, err = store.writeAtomic("data.txt", "new content")
+  fs.open = realOpen
+  H.check(not ok, "truncated write must be reported")
+  H.check(err ~= nil, "error text expected")
+  H.eq(env.files["data.txt"], "old content", "last good file")
+  H.eq(env.files["data.txt.new"], nil, "temporary file must be removed")
+end)
+
+test("progress saves are throttled but the journal keeps the cell count", function()
+  local env, miner = H.setup({ config = { tunnels = 1, length = 24, useTorches = false } })
+  local writes = 0
+  local realOpen = fs.open
+  fs.open = function(path, mode)
+    if mode == "w" and path == "miner.state.new" then
+      writes = writes + 1
+    end
+    return realOpen(path, mode)
+  end
+  local ok = miner.run()
+  fs.open = realOpen
+  H.check(ok, "run failed")
+  local cells = miner.getStatus().progress.total
+  H.check(writes < cells / 2, string.format("%d progress saves for %d cells", writes, cells))
+  H.eq(env.files["miner.state"], nil, "job files are removed at the end")
+end)
+
 return tests

@@ -6,8 +6,9 @@
 -- monitor, e.g. 4x4 blocks. Shows the telemetry of every turtle running
 -- miner.lua and sends pause/resume/home commands on touch.
 
-local VERSION = "2.2.0"
+local VERSION = "1.3.0"
 local PROTOCOL = "endermine.v1"
+local SECRET_FILE = "minermon.secret"
 local DEFAULT_SCALE = 0.5
 local STALE_AFTER = 15
 local MAX_EVENTS = 40
@@ -22,11 +23,6 @@ local FACING = { [0] = "forward", [1] = "right", [2] = "back", [3] = "left" }
 ---@type table<string, StateStyle>
 local STATE_STYLES = {
   starting = { label = "STARTING", color = colors.lightGray },
-  waiting = { label = "WAITING", color = colors.lightGray },
-  following = { label = "FOLLOWING", color = colors.green },
-  moving = { label = "MOVING", color = colors.cyan },
-  holding = { label = "HOLDING", color = colors.yellow },
-  blocked = { label = "BLOCKED", color = colors.orange },
   resuming = { label = "RESUMING", color = colors.lightBlue },
   lost = { label = "LOST", color = colors.red },
   mining = { label = "MINING", color = colors.green },
@@ -372,87 +368,6 @@ local function createApp(mon, opts)
     end
   end
 
-  ---@param id integer
-  ---@param msg table
-  local function relay(id, msg)
-    if not opts.send then
-      return
-    end
-    local ok, err = pcall(opts.send, id, msg)
-    if not ok then
-      addEvent(ensure(id), "Relay to #" .. id .. " failed: " .. tostring(err), "error")
-    end
-  end
-
-  ---@param entry table
-  ---@return boolean
-  local function isFollower(entry)
-    return type(entry.status) == "table" and entry.status.role == "follower"
-  end
-
-  --- Followers that are paired with a miner.
-  ---@param minerId integer
-  ---@return integer[]
-  local function followersOf(minerId)
-    local list = {}
-    for _, id in ipairs(app.order) do
-      local entry = app.turtles[id]
-      if isFollower(entry) and entry.status.follow == minerId then
-        list[#list + 1] = id
-      end
-    end
-    return list
-  end
-
-  ---@param entry table
-  ---@return boolean
-  local function wantsFollower(entry)
-    return type(entry.status) == "table" and not isFollower(entry) and entry.status.followerWanted == true
-  end
-
-  --- Pick a miner for a follower that has none: the lowest id that wants a
-  --- follower and has none yet.
-  ---@return integer|nil
-  local function freeMiner()
-    for _, id in ipairs(app.order) do
-      local entry = app.turtles[id]
-      if wantsFollower(entry) and #followersOf(id) == 0 then
-        return id
-      end
-    end
-    return nil
-  end
-
-  --- Forward a miner's position and progress to its followers.
-  ---@param minerId integer
-  ---@param status table
-  local function relayToFollowers(minerId, status)
-    local progress = type(status.progress) == "table" and status.progress or {}
-    if status.followerWanted ~= true then
-      -- The follower is optional: release followers of miners without one
-      for _, followerId in ipairs(followersOf(minerId)) do
-        relay(followerId, { type = "release", target = followerId, miner = minerId })
-      end
-      return
-    end
-    if progress.index == nil or type(status.job) ~= "table" then
-      -- Miner version without follower support
-      return
-    end
-    for _, followerId in ipairs(followersOf(minerId)) do
-      relay(followerId, {
-        type = "follow",
-        target = followerId,
-        miner = minerId,
-        state = status.state,
-        pos = status.pos,
-        progress = { done = progress.done, index = progress.index, phase = progress.phase },
-        job = status.job,
-        gpsFrame = status.gpsFrame,
-      })
-    end
-  end
-
   ---@param sender integer
   ---@param msg any
   ---@return boolean handled
@@ -466,40 +381,6 @@ local function createApp(mon, opts)
       entry.lastSeen = clock()
       if type(msg.label) == "string" and msg.label ~= "" then
         entry.label = msg.label
-      end
-      if type(msg.version) == "string" and msg.version ~= VERSION and entry.warnedVersion ~= msg.version then
-        entry.warnedVersion = msg.version
-        addEvent(entry, "Runs v" .. msg.version .. ", monitor runs v" .. VERSION .. " - run 'update'", "warn")
-      end
-      if isFollower(entry) then
-        if msg.follow == nil then
-          local minerId = freeMiner()
-          if minerId then
-            relay(sender, { type = "assign", target = sender, miner = minerId })
-            addEvent(entry, "Assigned to miner #" .. minerId, "cmd")
-          end
-        end
-      else
-        relayToFollowers(sender, msg)
-      end
-      return true
-    elseif msg.type == "blocked" then
-      local entry = ensure(sender)
-      entry.lastSeen = clock()
-      local followers = wantsFollower(entry) and followersOf(sender) or {}
-      for _, followerId in ipairs(followers) do
-        relay(followerId, {
-          type = "make_way",
-          target = followerId,
-          miner = sender,
-          pos = msg.pos,
-          dir = msg.dir,
-        })
-      end
-      if #followers > 0 then
-        addEvent(entry, "Blocked by a turtle, asked the follower to make way", "warn")
-      else
-        addEvent(entry, "Blocked by a turtle", "warn")
       end
       return true
     elseif msg.type == "event" then
@@ -518,7 +399,7 @@ local function createApp(mon, opts)
     if id == nil or not opts.send then
       return false
     end
-    local ok, err = pcall(opts.send, id, { type = "command", cmd = cmd, target = id })
+    local ok, err = pcall(opts.send, id, { type = "command", cmd = cmd, target = id, secret = opts.secret })
     local entry = ensure(id)
     if ok then
       addEvent(entry, "Sent '" .. cmd .. "'", "cmd")
@@ -584,45 +465,6 @@ local function createApp(mon, opts)
     end
     add({ kind = "badge", label = style.label, color = style.color, text = info })
     gap()
-
-    if s.role == "follower" then
-      local loader = tostring(s.chunkLoader or "none")
-      add({
-        kind = "kv",
-        key = "Following",
-        value = s.follow and ("#" .. tostring(s.follow)) or "not assigned",
-        color = s.follow and colors.white or colors.orange,
-      })
-      add({
-        kind = "kv",
-        key = "Distance",
-        value = s.distance and (tostring(num(s.distance)) .. " blocks") or "--",
-      })
-      add({
-        kind = "kv",
-        key = "Chunk loader",
-        value = loader,
-        color = loader == "none" and colors.red or colors.green,
-      })
-      gap()
-      local fuel = num(s.fuel)
-      add({
-        kind = "kv",
-        key = "Fuel",
-        value = fuel < 0 and "unlimited" or fmtNumber(fuel),
-        color = (fuel >= 0 and fuel < 200) and colors.red or colors.green,
-      })
-      local fp = type(s.pos) == "table" and s.pos or {}
-      add({ kind = "kv", key = "Position", value = string.format("%d/%d/%d", num(fp.x), num(fp.y), num(fp.z)) })
-      add({ kind = "kv", key = "Restarts", value = tostring(num(s.restarts)) })
-      add({
-        kind = "kv",
-        key = "Version",
-        value = tostring(s.version or "?"),
-        color = s.version == VERSION and colors.white or colors.orange,
-      })
-      return rows
-    end
 
     local progress = type(s.progress) == "table" and s.progress or {}
     local total = num(progress.total)
@@ -695,12 +537,6 @@ local function createApp(mon, opts)
     add({ kind = "kv", key = "Junk dropped", value = fmtNumber(num(s.junkDropped)) })
     add({ kind = "kv", key = "Moved", value = fmtNumber(num(s.moved)) .. " blocks" })
     add({ kind = "kv", key = "Resupplies", value = fmtNumber(num(s.resupplies)) })
-    local followerText = "off"
-    if s.followerWanted == true then
-      local paired = followersOf(entry.id)
-      followerText = #paired > 0 and ("#" .. tostring(paired[1])) or "waiting for one"
-    end
-    add({ kind = "kv", key = "Follower", value = followerText })
     add({
       kind = "kv",
       key = "Restarts",
@@ -709,18 +545,6 @@ local function createApp(mon, opts)
     })
     add({ kind = "kv", key = "Uptime", value = fmtDuration(s.uptime) })
     local job = type(s.job) == "table" and s.job or nil
-    if job and job.mode == "ores" then
-      local levels = {}
-      for _, y in ipairs(type(job.oreLevels) == "table" and job.oreLevels or {}) do
-        levels[#levels + 1] = tostring(y)
-      end
-      add({
-        kind = "kv",
-        key = "Job",
-        value = string.format("ores Y %s, %dx%d", table.concat(levels, ","), num(job.areaWidth), num(job.areaLength)),
-      })
-      job = nil
-    end
     if job then
       add({
         kind = "kv",
@@ -873,21 +697,15 @@ local function createApp(mon, opts)
         for y = top, bottom do
           cv.text(leftWidth + 3, y, "|", colors.gray, colors.black)
         end
-        local nextY = top - 1
-        if status.role ~= "follower" then
-          local oreRows = math.max(3, math.floor((bottom - top) / 2))
-          nextY = drawOres(cv, rightX, top, rightWidth, top + oreRows - 1, status.ores)
-        end
+        local oreRows = math.max(3, math.floor((bottom - top) / 2))
+        local nextY = drawOres(cv, rightX, top, rightWidth, top + oreRows - 1, status.ores)
         drawEvents(cv, rightX, nextY + 1, rightWidth, bottom, entry.events)
       else
         local nextY = drawRows(cv, 2, top, w - 2, bottom, rows)
         local remaining = bottom - nextY
         if remaining >= 4 then
-          local afterOres = nextY
-          if status.role ~= "follower" then
-            local oreBottom = nextY + math.floor(remaining / 2)
-            afterOres = drawOres(cv, 2, nextY + 1, w - 2, oreBottom, status.ores)
-          end
+          local oreBottom = nextY + math.floor(remaining / 2)
+          local afterOres = drawOres(cv, 2, nextY + 1, w - 2, oreBottom, status.ores)
           drawEvents(cv, 2, afterOres + 1, w - 2, bottom, entry.events)
         end
       end
@@ -910,44 +728,27 @@ local function findWirelessModem()
   end)
 end
 
----@param argv string[]
---- Run the auto updater when it is installed.
----@param argv string[] Arguments without "--no-update"
----@return boolean restarted A newer version ran, this one has to stop
-local function runAutoUpdate(argv)
-  if not shell or not fs.exists("update.lua") then
-    return false
+--- Shared command secret from the optional file "minermon.secret".
+---@return string|nil
+local function readSecret()
+  if not fs.exists(SECRET_FILE) then
+    return nil
   end
-  local chunk = loadfile("update.lua")
-  if not chunk then
-    return false
+  local handle = fs.open(SECRET_FILE, "r")
+  if not handle then
+    return nil
   end
-  local ok, updater = pcall(chunk, "--lib")
-  if not ok or type(updater) ~= "table" or type(updater.autoUpdate) ~= "function" then
-    return false
+  local text = handle.readAll() or ""
+  handle.close()
+  text = text:gsub("%s+$", ""):gsub("^%s+", "")
+  if text == "" then
+    return nil
   end
-  return updater.autoUpdate({
-    role = "monitor",
-    current = VERSION,
-    program = shell.getRunningProgram(),
-    args = argv,
-    shell = shell,
-  })
+  return text
 end
 
----@param rawArgs string[]
-local function main(rawArgs)
-  local argv, noUpdate = {}, false
-  for _, arg in ipairs(rawArgs) do
-    if arg == "--no-update" then
-      noUpdate = true
-    else
-      argv[#argv + 1] = arg
-    end
-  end
-  if not noUpdate and runAutoUpdate(argv) then
-    return
-  end
+---@param argv string[]
+local function main(argv)
   local scale = tonumber(argv[1]) or DEFAULT_SCALE
   local mon = peripheral.find("monitor")
   if not mon then
@@ -974,6 +775,7 @@ local function main(rawArgs)
 
   local app = createApp(mon, {
     useWindow = true,
+    secret = readSecret(),
     send = function(id, msg)
       rednet.send(id, msg, PROTOCOL)
     end,

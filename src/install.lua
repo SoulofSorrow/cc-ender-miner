@@ -2,56 +2,37 @@
 -- Copyright (C) 2026 Julian Schäfer
 -- SPDX-License-Identifier: GPL-3.0-or-later
 --
--- Usage:  install [miner|monitor|follower|station] [--startup]
--- Without a role, turtles get the miner and computers get the monitor.
--- Every role also gets the updater (update.lua), which keeps the programs
--- current from then on.
+-- Usage:  install [miner|monitor] [--startup]
+-- Without a target, turtles get the miner and computers get the monitor.
 
-local BASE_URL = "https://raw.githubusercontent.com/SoulofSorrow/cc-ender-miner/main/"
+local BASE_URL = "https://raw.githubusercontent.com/SoulofSorrow/cc-ender-miner/main/src/"
 
----@class InstallRole
----@field files table<string, string> Local file name -> path in the repository
----@field program string Program started by --startup
+---@class InstallFile
+---@field source string Path below src/ in the repository
+---@field dest string Path on the computer
 
----@type table<string, InstallRole>
-local ROLES = {
+---@class InstallTarget
+---@field program string Program name on the computer
+---@field files InstallFile[]
+
+---@type table<string, InstallTarget>
+local TARGETS = {
   miner = {
-    files = { ["miner.lua"] = "src/miner.lua", ["update.lua"] = "src/update.lua" },
     program = "miner",
+    files = {
+      { source = "miner.lua", dest = "miner.lua" },
+      { source = "endermine/util.lua", dest = "endermine/util.lua" },
+      { source = "endermine/config.lua", dest = "endermine/config.lua" },
+      { source = "endermine/store.lua", dest = "endermine/store.lua" },
+      { source = "endermine/geometry.lua", dest = "endermine/geometry.lua" },
+      { source = "endermine/wizard.lua", dest = "endermine/wizard.lua" },
+    },
   },
   monitor = {
-    files = { ["minermon.lua"] = "src/minermon.lua", ["update.lua"] = "src/update.lua" },
     program = "minermon",
-  },
-  follower = {
-    files = {
-      ["follower.lua"] = "src/follower.lua",
-      ["miner.lua"] = "src/miner.lua",
-      ["update.lua"] = "src/update.lua",
-    },
-    program = "follower",
-  },
-  station = {
-    files = {
-      ["station.lua"] = "src/station.lua",
-      ["miner.lua"] = "src/miner.lua",
-      ["update.lua"] = "src/update.lua",
-    },
-    program = "station",
+    files = { { source = "minermon.lua", dest = "minermon.lua" } },
   },
 }
-
----@return string
-local function baseUrl()
-  local url = settings and settings.get("endermine.update_url") or nil
-  if type(url) ~= "string" or url == "" then
-    url = BASE_URL
-  end
-  if url:sub(-1) ~= "/" then
-    url = url .. "/"
-  end
-  return url
-end
 
 ---@param url string
 ---@return string|nil body
@@ -93,58 +74,62 @@ end
 ---@param argv string[]
 ---@return boolean success
 local function main(argv)
-  local roleName = nil
+  local targetName = nil
   local startup = false
   for _, arg in ipairs(argv) do
     if arg == "--startup" then
       startup = true
-    elseif ROLES[arg] then
-      roleName = arg
+    elseif TARGETS[arg] then
+      targetName = arg
     else
       printError("Unknown argument: " .. arg)
-      print("Usage: install [miner|monitor|follower|station] [--startup]")
+      print("Usage: install [miner|monitor] [--startup]")
       return false
     end
   end
-  roleName = roleName or (turtle and "miner" or "monitor")
-  local role = ROLES[roleName]
+  targetName = targetName or (turtle and "miner" or "monitor")
+  local target = TARGETS[targetName]
 
-  -- Download and check everything first, then write: no half installs
-  local contents = {}
-  for name, path in pairs(role.files) do
-    print("Downloading " .. name .. " ...")
-    local body, err = download(baseUrl() .. path)
+  -- Download and check every file first so a failure leaves the old install intact
+  local downloaded = {}
+  for _, file in ipairs(target.files) do
+    print("Downloading " .. file.source .. " ...")
+    local body, err = download(BASE_URL .. file.source)
     if not body then
-      printError("Download of " .. name .. " failed: " .. tostring(err))
+      printError("Download failed: " .. tostring(err))
       return false
     end
     -- Refuse obviously broken downloads (e.g. an HTML error page)
-    local chunk, syntaxErr = load(body, "=" .. name, "t", {})
+    local chunk, syntaxErr = load(body, "=" .. file.dest, "t", {})
     if not chunk then
-      printError(name .. " is not valid Lua: " .. tostring(syntaxErr))
+      printError(file.source .. " is not valid Lua: " .. tostring(syntaxErr))
       return false
     end
-    contents[name] = body
+    downloaded[#downloaded + 1] = { dest = file.dest, body = body }
   end
-  for name, body in pairs(contents) do
-    local ok, err = writeFile(name, body)
+  for _, file in ipairs(downloaded) do
+    local dir = fs.getDir(file.dest)
+    if dir ~= "" and not fs.exists(dir) then
+      fs.makeDir(dir)
+    end
+    local ok, writeErr = writeFile(file.dest, file.body)
     if not ok then
-      printError("Cannot write " .. name .. ": " .. tostring(err))
+      printError("Cannot write " .. file.dest .. ": " .. tostring(writeErr))
       return false
     end
   end
-  print("Installed role '" .. roleName .. "', start it with '" .. role.program .. "'")
+  print("Installed as '" .. target.program .. "'")
 
   if startup then
     if fs.exists("startup.lua") then
       printError("startup.lua exists already, not overwriting it")
     else
-      local line = string.format('shell.run("%s")\n', role.program)
-      local ok, err = writeFile("startup.lua", line)
-      if ok then
+      local line = string.format('shell.run("%s")\n', target.program)
+      local okStartup, startupErr = writeFile("startup.lua", line)
+      if okStartup then
         print("Created startup.lua")
       else
-        printError("Cannot write startup.lua: " .. tostring(err))
+        printError("Cannot write startup.lua: " .. tostring(startupErr))
       end
     end
   end

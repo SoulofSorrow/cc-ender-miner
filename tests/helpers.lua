@@ -5,25 +5,12 @@ local Mock = require("mock_cc")
 local H = {}
 
 H.SRC = os.getenv("SRC_DIR") or "src"
+package.path = H.SRC .. "/?.lua;" .. package.path
 
 ---@param path string
 ---@return table module
 function H.loadProgram(path)
   local chunk, err = loadfile(path)
-  if not chunk then
-    error("cannot load " .. path .. ": " .. tostring(err), 0)
-  end
-  return chunk("--lib")
-end
-
---- Load a program with its own globals on top of _G, like a separate
---- computer: overrides may replace turtle, os, rednet and so on.
----@param path string
----@param overrides table
----@return table module
-function H.loadProgramEnv(path, overrides)
-  local env = setmetatable(overrides, { __index = _G })
-  local chunk, err = loadfile(path, "t", env)
   if not chunk then
     error("cannot load " .. path .. ": " .. tostring(err), 0)
   end
@@ -113,7 +100,7 @@ function H.assertCleared(env, cfg)
       for y = 0, cfg.height - 1 do
         for z = 1, cfg.length do
           local block = env.get(x, y, z)
-          if block ~= "air" and block ~= "minecraft:torch" and block ~= "turtle" then
+          if block ~= "air" and block ~= "minecraft:torch" then
             error(string.format("block %s left at %d/%d/%d (tunnel %d)", block, x, y, z, tunnel + 1), 2)
           end
         end
