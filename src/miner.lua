@@ -29,7 +29,7 @@ local store = require("endermine.store")
 local geometry = require("endermine.geometry")
 local wizard = require("endermine.wizard")
 
-local VERSION = "1.3.0"
+local VERSION = "3.0.0"
 local PROTOCOL = "endermine.v1"
 local CONFIG_FILE = "miner.cfg"
 

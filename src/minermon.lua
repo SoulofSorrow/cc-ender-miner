@@ -6,7 +6,7 @@
 -- monitor, e.g. 4x4 blocks. Shows the telemetry of every turtle running
 -- miner.lua and sends pause/resume/home commands on touch.
 
-local VERSION = "1.3.0"
+local VERSION = "3.0.0"
 local PROTOCOL = "endermine.v1"
 local SECRET_FILE = "minermon.secret"
 local DEFAULT_SCALE = 0.5

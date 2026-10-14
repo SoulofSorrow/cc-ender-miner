@@ -6,7 +6,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.3.0] - 2026-10-14
+## [3.0.0] - 2026-10-14
 
 ### Added
 
@@ -31,6 +31,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - `miner` is split into `src/miner.lua` and the modules in `src/endermine/`.
   `install` downloads all files.
 - Renamed the README files: `README.md` is English, `README.de.md` is German.
+
+### Removed
+
+- `station`, `follower` and the updater (`update`, `manifest.json`), together
+  with ore mode and dock mode of the miner.
 
 ## [1.2.0] - 2026-10-11
 
@@ -91,7 +96,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Offline simulation tests, luacheck, StyLua, pre-commit hooks and a Makefile
   for building, testing and releasing.
 
-[Unreleased]: https://github.com/SoulofSorrow/cc-ender-miner/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/SoulofSorrow/cc-ender-miner/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/SoulofSorrow/cc-ender-miner/compare/v2.2.0...v3.0.0
 [1.2.0]: https://github.com/SoulofSorrow/cc-ender-miner/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/SoulofSorrow/cc-ender-miner/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/SoulofSorrow/cc-ender-miner/releases/tag/v1.0.0
